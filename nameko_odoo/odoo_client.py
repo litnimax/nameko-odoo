@@ -1,11 +1,8 @@
 import logging
-import uuid
 from nameko.extensions import DependencyProvider
-from nameko.dependency_providers import Config
-from nameko.rpc import rpc
 import odoorpc
 import requests
-from urllib2 import URLError
+from urllib.error import URLError
 
 
 logger = logging.getLogger(__name__)

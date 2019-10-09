@@ -12,6 +12,7 @@ setup(
     packages=find_packages(exclude=['test', 'test.*']),
     install_requires=[
         "nameko>=2.8.5",
+        "odoorpc>=0.7.0",
     ],
     extras_require={
         'dev': [
