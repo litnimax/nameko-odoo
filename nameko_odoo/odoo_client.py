@@ -17,7 +17,6 @@ class OdooClient(DependencyProvider):
     def setup(self):
         self.odoo_host = self.container.config['ODOO_HOST']
         self.odoo_port = self.container.config['ODOO_PORT']
-        print self.container.config
         self.odoo_user = self.container.config['ODOO_USER']
         self.odoo_pass = self.container.config['ODOO_PASS']
         self.odoo_protocol = self.container.config['ODOO_PROTOCOL']
