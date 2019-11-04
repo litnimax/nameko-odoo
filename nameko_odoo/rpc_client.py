@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 class OdooClient(DependencyProvider):
     odoo = None
+    odoo_connected = eventlet.Event()
 
     def get_dependency(self, worker_ctx):
         return self.odoo
@@ -43,6 +44,7 @@ class OdooClient(DependencyProvider):
                 odoo.login(self.odoo_db, self.odoo_user, self.odoo_pass)
                 logger.info('Connected to Odoo as %s', self.odoo_user)
                 self.odoo = odoo
+                self.odoo_connected.send()
                 break
             except odoorpc.error.RPCError as e:
                 if 'res.users()' in str(e):
