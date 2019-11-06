@@ -1,7 +1,8 @@
 import eventlet
 import json
 import logging
-from nameko.extensions import Entrypoint
+from nameko.extensions import Entrypoint, DependencyProvider
+from nameko.extensions import SharedExtension, ProviderCollector
 import odoorpc
 import requests
 from urllib.error import URLError
@@ -10,16 +11,16 @@ from urllib.error import URLError
 logger = logging.getLogger(__name__)
 
 
-class BusEventHandler(Entrypoint):
+class OdooConnection(SharedExtension, ProviderCollector):
     odoo = None
     odoo_connected = eventlet.Event()
     db_selected = False
     http_session = None  # Requests session for bus polling
-    bus_channels = []  # Channels to poll bus on.    
+    channels = []  # Channels to poll bus on.
+    channel_handlers = {} # Methods of providers
 
-    def __init__(self, channels, **kwargs):
-        self.bus_channels = channels
-        super(BusEventHandler, self).__init__(**kwargs)
+    def add_channel(self, channel):
+        self.channels.append(channel)
 
     def setup(self):
         # Must be defined settings
@@ -44,9 +45,25 @@ class BusEventHandler(Entrypoint):
         self.single_db = self.container.config.get('ODOO_SINGLE_DB', False)
         self.verify_certificate = self.container.config.get(
             'ODOO_VERIFY_CERTIFICATE', False)
+
+    def start(self):
+        #self._register_channels()
         self.setup_rpc_session()
         self.http_session = requests.Session()
-        self.container.spawn_managed_thread(self.poll_bus)
+        self.container.spawn_managed_thread(self.poll_bus,
+                                            identifier='odoo_bus_poller')
+
+    def _register_channels(self):
+        for provider in self._providers:
+            for channel in provider.channels:
+                self.channels.append(channel)
+                self.register_event_handler(channel, provider.handle_message)
+
+    def register_event_handler(self, channel, callback):
+        if not self.channel_handlers.get(channel):
+            self.channel_handlers[channel] = [callback]
+        else:
+            self.channel_handlers[channel].append(callback)
 
     def setup_rpc_session(self):
         try:
@@ -58,7 +75,9 @@ class BusEventHandler(Entrypoint):
             odoo.login(self.odoo_db, self.odoo_user, self.odoo_pass)
             logger.info('Connected to Odoo as %s', self.odoo_user)
             self.odoo = odoo
-            self.odoo_connected.send()
+            self.odoo.odoo_connected = self.odoo_connected
+            if not self.odoo_connected.ready():
+                self.odoo_connected.send()
 
         except odoorpc.error.RPCError as e:
             if 'res.users()' in str(e):
@@ -130,7 +149,7 @@ class BusEventHandler(Entrypoint):
                 if not self.single_db:
                     self.select_db()
                 # Now let try to poll
-                logger.debug('Polling %s at %s', self.bus_channels, bus_url)
+                logger.debug('Polling %s at %s', self.channels, bus_url)
                 r = self.http_session.post(
                     bus_url,
                     timeout=self.bus_timeout,
@@ -139,7 +158,7 @@ class BusEventHandler(Entrypoint):
                     json={
                         'params': {
                             'last': last,
-                            'channels': self.bus_channels}})
+                            'channels': self.channels}})
                 if self.bus_trace:
                     logger.debug('Bus trace: %s', r.text)
                 try:
@@ -164,7 +183,10 @@ class BusEventHandler(Entrypoint):
                 for msg in result:
                     last = msg['id']
                     logger.debug('Handle bus message %s', msg)
-                    self.handle_bus_message(msg['channel'], msg['message'])
+                    try:
+                        self.handle_bus_message(msg['channel'], msg['message'])
+                    except Exception:
+                        logger.exception('Handle bus message error:')
 
             except Exception as e:
                 no_wait = False
@@ -187,10 +209,11 @@ class BusEventHandler(Entrypoint):
 
     def handle_bus_message(self, channel, message):
         # Get provieers and pass the message
-        if channel in self.bus_channels:
-            self.container.spawn_worker(self, (channel, message), {})
-        else:
-            logger.warning('Ignoring message on channel %s', channel)
+        for provider in self._providers:
+                provider.handle_message(channel, message)
+        if not self._providers:
+            logger.warning('Ignoring message on channel %s, no providers',
+                           channel)
 
     def notify_user(self, uid, message, title='Notification',
                     level='info', sticky=False):
@@ -206,6 +229,49 @@ class BusEventHandler(Entrypoint):
 
     def bus_sendone(self, channel, message):
         self.odoo.env['bus.bus'].sendone(channel, message)
+
+
+class OdooClient(DependencyProvider):
+    connection = OdooConnection()
+
+    def get_dependency(self, worker_ctx):
+        if not self.connection.odoo:
+            logger.info('Odoo not initialized, waiting...')
+            eventlet.sleep(1)
+            return self.get_dependency(worker_ctx)
+        return self.connection.odoo
+
+    def worker_setup(self, worker_ctx):
+        worker_ctx.odoo_connected = self.connection.odoo_connected
+
+
+class BusEventHandler(Entrypoint):
+    connection = OdooConnection()
+
+    def __init__(self, channels):
+        self.channels = list(channels)
+        super(BusEventHandler, self).__init__()
+
+    def add_channel(self, channel):
+        if channel not in self.channels:
+            self.channels.append(channel)
+            self.connection.channels.append(channel)
+        print(self.channels)
+
+    def setup(self):
+        print(self.channels)
+        for channel in self.channels:
+            self.connection.channels.append(channel)
+        self.connection.register_provider(self)
+
+    def stop(self):
+        self.connection.unregister_provider(self)
+
+    def handle_message(self, channel, message):
+        if channel in self.channels:
+            self.container.spawn_worker(self, (channel, message), {})
+        else:
+            logger.debug('Ignoring message on channel %s', channel)
 
 
 bus = BusEventHandler.decorator
