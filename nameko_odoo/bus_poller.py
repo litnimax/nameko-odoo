@@ -35,14 +35,14 @@ class OdooConnection(SharedExtension, ProviderCollector):
             'ODOO_PROTOCOL', 'jsonrpc')
         self.odoo_scheme = self.container.config.get(
             'ODOO_SCHEME', 'http')
-        self.bus_enabled = self.container.config.get('ODOO_BUS_ENABLED', True)
+        self.bus_enabled = self.container.config.get('ODOO_BUS_ENABLED', '1')
         self.bus_polling_port = self.container.config.get(
             'ODOO_BUS_POLLING_PORT', 8072)
         self.bus_timeout = self.container.config.get(
             'ODOO_BUS_TIMEOUT', 55)
         self.bus_trace = self.container.config.get(
             'ODOO_BUS_TRACE', False)
-        self.single_db = self.container.config.get('ODOO_SINGLE_DB', False)
+        self.single_db = self.container.config.get('ODOO_SINGLE_DB', '0')
         self.verify_certificate = self.container.config.get(
             'ODOO_VERIFY_CERTIFICATE', False)
 
@@ -136,7 +136,7 @@ class OdooConnection(SharedExtension, ProviderCollector):
         Odoo bus poller to get massages from Odoo
         and route the to corresponding services.
         """
-        if not self.bus_enabled:
+        if str(self.bus_enabled) != '1':
             logger.info(
                 'Odoo bus poll is not enabled, not using /longpolling/poll.')
             return
@@ -146,7 +146,7 @@ class OdooConnection(SharedExtension, ProviderCollector):
                 bus_url = '{}://{}:{}/longpolling/poll'.format(
                     self.odoo_scheme, self.odoo_host, self.bus_polling_port)
                 # Select DB first
-                if not self.single_db:
+                if str(self.single_db) != '1':
                     self.select_db()
                 # Now let try to poll
                 logger.debug('Polling %s at %s', self.channels, bus_url)
