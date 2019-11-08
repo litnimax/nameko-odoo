@@ -17,7 +17,6 @@ class OdooConnection(SharedExtension, ProviderCollector):
     db_selected = False
     http_session = None  # Requests session for bus polling
     channels = []  # Channels to poll bus on.
-    channel_handlers = {} # Methods of providers
 
     def add_channel(self, channel):
         self.channels.append(channel)
@@ -47,23 +46,10 @@ class OdooConnection(SharedExtension, ProviderCollector):
             'ODOO_VERIFY_CERTIFICATE', False)
 
     def start(self):
-        #self._register_channels()
         self.setup_rpc_session()
         self.http_session = requests.Session()
         self.container.spawn_managed_thread(self.poll_bus,
                                             identifier='odoo_bus_poller')
-
-    def _register_channels(self):
-        for provider in self._providers:
-            for channel in provider.channels:
-                self.channels.append(channel)
-                self.register_event_handler(channel, provider.handle_message)
-
-    def register_event_handler(self, channel, callback):
-        if not self.channel_handlers.get(channel):
-            self.channel_handlers[channel] = [callback]
-        else:
-            self.channel_handlers[channel].append(callback)
 
     def setup_rpc_session(self):
         try:
@@ -256,10 +242,8 @@ class BusEventHandler(Entrypoint):
         if channel not in self.channels:
             self.channels.append(channel)
             self.connection.channels.append(channel)
-        print(self.channels)
 
     def setup(self):
-        print(self.channels)
         for channel in self.channels:
             self.connection.channels.append(channel)
         self.connection.register_provider(self)
