@@ -1,9 +1,21 @@
-#!/usr/bin/env python
+import re
+import os
 from setuptools import find_packages, setup
+
+
+def get_version():
+    version_file = open(os.path.join(
+        os.path.dirname(__file__), 'nameko_odoo', '__init__.py')).read()
+    version_match = re.search(r"^__version__ = ['\"]([^'\"]*)['\"]",
+                              version_file, re.M)
+    if version_match:
+        return version_match.group(1)
+    raise RuntimeError("Unable to find version string.")
+
 
 setup(
     name='nameko-odoo',
-    version='1.0.0',
+    version=get_version(),
     description=(
         'Nameko Odoo extension'
     ),

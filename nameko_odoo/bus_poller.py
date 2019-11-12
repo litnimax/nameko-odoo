@@ -29,11 +29,10 @@ class OdooConnection(SharedExtension, ProviderCollector):
         self.odoo_pass = self.container.config['ODOO_PASS']
         self.odoo_db = self.container.config['ODOO_DB']
         # Optional settings, use defaults.
-        # See OdooRPC protocol: 'jsonrpc' or jsonrpc+ssl'
-        self.odoo_protocol = self.container.config.get(
-            'ODOO_PROTOCOL', 'jsonrpc')
         self.odoo_scheme = self.container.config.get(
             'ODOO_SCHEME', 'http')
+        self.odoo_protocol = ('jsonrpc' if self.odoo_scheme == 'http' else
+                              'jsonrpc+ssl')
         self.bus_enabled = self.container.config.get('ODOO_BUS_ENABLED', '1')
         self.bus_polling_port = self.container.config.get(
             'ODOO_BUS_POLLING_PORT', 8072)
