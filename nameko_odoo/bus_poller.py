@@ -33,14 +33,14 @@ class OdooConnection(SharedExtension, ProviderCollector):
             'ODOO_SCHEME', 'http')
         self.odoo_protocol = ('jsonrpc' if self.odoo_scheme == 'http' else
                               'jsonrpc+ssl')
-        self.bus_enabled = self.container.config.get('ODOO_BUS_ENABLED', '1')
+        self.bus_enabled = self.container.config.get('ODOO_BUS_ENABLED', True)
         self.bus_polling_port = self.container.config.get(
             'ODOO_BUS_POLLING_PORT', 8072)
         self.bus_timeout = self.container.config.get(
             'ODOO_BUS_TIMEOUT', 55)
         self.bus_trace = self.container.config.get(
             'ODOO_BUS_TRACE', False)
-        self.single_db = self.container.config.get('ODOO_SINGLE_DB', '0')
+        self.single_db = self.container.config.get('ODOO_SINGLE_DB', False)
         self.verify_certificate = self.container.config.get(
             'ODOO_VERIFY_CERTIFICATE', False)
 
@@ -68,11 +68,14 @@ class OdooConnection(SharedExtension, ProviderCollector):
             if 'res.users()' in str(e):
                 logger.error('Odoo login %s not found or bad password %s, '
                              'check in Odoo!', self.odoo_user, self.odoo_pass)
+            elif 'FATAL' in repr(e):
+                logger.error('Odoo fatal error: %s', e)
             else:
                 logger.exception('RPC error:')
         except URLError as e:
             logger.error(e)
         except Exception as e:
+            print(1, repr(e), str(e))
             if 'Connection refused' in repr(e):
                 logger.error('Odoo refusing connection.')
             else:
@@ -121,7 +124,7 @@ class OdooConnection(SharedExtension, ProviderCollector):
         Odoo bus poller to get massages from Odoo
         and route the to corresponding services.
         """
-        if str(self.bus_enabled) != '1':
+        if not self.bus_enabled:
             logger.info(
                 'Odoo bus poll is not enabled, not using /longpolling/poll.')
             return
@@ -223,7 +226,6 @@ class OdooClient(DependencyProvider):
         if not self.connection.odoo:
             logger.info('Odoo not initialized, waiting...')
             eventlet.sleep(1)
-            return self.get_dependency(worker_ctx)
         return self.connection.odoo
 
     def worker_setup(self, worker_ctx):
