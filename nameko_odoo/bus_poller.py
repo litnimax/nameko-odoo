@@ -1,5 +1,6 @@
 import eventlet
 import json
+import http.client
 import logging
 from nameko.extensions import Entrypoint, DependencyProvider
 from nameko.extensions import SharedExtension, ProviderCollector
@@ -43,12 +44,22 @@ class OdooConnection(SharedExtension, ProviderCollector):
         self.single_db = self.container.config.get('ODOO_SINGLE_DB', False)
         self.verify_certificate = self.container.config.get(
             'ODOO_VERIFY_CERTIFICATE', False)
+        logger.debug('Odoo connection setup done.')
 
     def start(self):
-        self.setup_rpc_session()
+        effort = 10
+        while True:
+            self.setup_rpc_session()
+            if self.odoo:
+                break
+            if effort % 10 == 0:
+                logger.debug('Odoo RPC not setup, waiting...')
+            effort += 1
+            eventlet.sleep(0.1)
         self.http_session = requests.Session()
         self.container.spawn_managed_thread(self.poll_bus,
                                             identifier='odoo_bus_poller')
+        logger.debug('Odoo connection has been started.')
 
     def setup_rpc_session(self):
         try:
@@ -60,9 +71,8 @@ class OdooConnection(SharedExtension, ProviderCollector):
             odoo.login(self.odoo_db, self.odoo_user, self.odoo_pass)
             logger.info('Connected to Odoo as %s', self.odoo_user)
             self.odoo = odoo
-            self.odoo.odoo_connected = self.odoo_connected
             if not self.odoo_connected.ready():
-                self.odoo_connected.send()
+                self.odoo_connected.send(odoo)
 
         except odoorpc.error.RPCError as e:
             if 'res.users()' in str(e):
@@ -74,6 +84,8 @@ class OdooConnection(SharedExtension, ProviderCollector):
                 logger.exception('RPC error:')
         except URLError as e:
             logger.error(e)
+        except http.client.RemoteDisconnected:
+            logger.error('Odoo remote disconnection.')
         except Exception as e:
             print(1, repr(e), str(e))
             if 'Connection refused' in repr(e):
@@ -134,7 +146,7 @@ class OdooConnection(SharedExtension, ProviderCollector):
                 bus_url = '{}://{}:{}/longpolling/poll'.format(
                     self.odoo_scheme, self.odoo_host, self.bus_polling_port)
                 # Select DB first
-                if str(self.single_db) != '1':
+                if not self.single_db:
                     self.select_db()
                 # Now let try to poll
                 logger.debug('Polling %s at %s', self.channels, bus_url)
@@ -170,7 +182,7 @@ class OdooConnection(SharedExtension, ProviderCollector):
                 # my channel as Odoo can send a match
                 for msg in result:
                     last = msg['id']
-                    logger.debug('Handle bus message %s', msg)
+                    logger.debug('Received bus message %s', msg)
                     try:
                         self.handle_bus_message(msg['channel'], msg['message'])
                     except Exception:
@@ -223,24 +235,35 @@ class OdooClient(DependencyProvider):
     connection = OdooConnection()
 
     def get_dependency(self, worker_ctx):
-        if not self.connection.odoo:
-            logger.info('Odoo not initialized, waiting...')
-            eventlet.sleep(1)
+        effort = 10
+        while True:
+            if not self.connection.odoo:
+                if effort % 10 == 0:
+                    # Log first and every 10-n effort
+                    logger.debug('Odoo not ready, waiting...')
+                effort += 1
+                eventlet.sleep(0.1)
+            else:
+                break
         return self.connection.odoo
 
     def worker_setup(self, worker_ctx):
-        worker_ctx.odoo_connected = self.connection.odoo_connected
+        worker_ctx.service.odoo_connected = self.connection.odoo_connected
 
 
 class BusEventHandler(Entrypoint):
     connection = OdooConnection()
+    # Sometimes you inherit OdooConnection and put custom channels there.
+    # So in this case Entrypoint class does not have those channels.
+    check_entrypoint_channels = True
 
-    def __init__(self, channels):
+    def __init__(self, channels=[]):
         self.channels = list(channels)
         super(BusEventHandler, self).__init__()
 
     def add_channel(self, channel):
         if channel not in self.channels:
+            logger.debug('Adding %s to polling channels.', channel)
             self.channels.append(channel)
             self.connection.channels.append(channel)
 
@@ -253,10 +276,10 @@ class BusEventHandler(Entrypoint):
         self.connection.unregister_provider(self)
 
     def handle_message(self, channel, message):
-        if channel in self.channels:
-            self.container.spawn_worker(self, (channel, message), {})
+        if self.check_entrypoint_channels and channel not in self.channels:
+            logger.debug('Ignoring message on uknown channel %s', channel)
         else:
-            logger.debug('Ignoring message on channel %s', channel)
+            self.container.spawn_worker(self, (channel, message), {})
 
 
 bus = BusEventHandler.decorator
