@@ -1,3 +1,4 @@
+from functools import partial
 import eventlet
 import json
 import http.client
@@ -6,6 +7,9 @@ from nameko.extensions import Entrypoint, DependencyProvider
 from nameko.extensions import SharedExtension, ProviderCollector
 import odoorpc
 import requests
+import time
+import traceback
+import uuid
 from urllib.error import URLError
 
 
@@ -46,17 +50,43 @@ class OdooConnection(SharedExtension, ProviderCollector):
             'ODOO_VERIFY_CERTIFICATE', False)
         logger.debug('Odoo connection setup done.')
 
+    def update_token(self):
+        # Generate and send a secure token used to communicate with Agent
+        agent_model = self.container.config.get('ODOO_AGENT_MODEL')
+        if not agent_model:
+            logger.info('Agent model not set, disabling token update routine.')
+            return
+        while True:
+            try:
+                # Keep previous token
+                if hasattr(self, 'token'):
+                    self.token_old = self.token
+                else:
+                    self.token_old = None
+                # Generate new token
+                self.token = uuid.uuid4().hex
+                self.odoo.env[agent_model].update_token(
+                    self.container.config['ODOO_AGENT_UID'], self.token)
+                # Keep time of token update
+                self.token_update_time = time.time()
+                logger.debug('Agent token updated.')
+            except Exception:
+                logger.exception('Update token error:')
+            finally:
+                eventlet.sleep(
+                    float(self.container.config['ODOO_REFRESH_TOKEN_SECONDS']))                
+
     def start(self):
-        effort = 10
+        effort = 11
         while True:
             self.setup_rpc_session()
             if self.odoo:
                 break
-            if effort % 10 == 0:
-                logger.debug('Odoo RPC not setup, waiting...')
+            logger.info('Odoo RPC not setup, waiting...')
+            eventlet.sleep(effort % 10)
             effort += 1
-            eventlet.sleep(0.1)
         self.http_session = requests.Session()
+        self.container.spawn_managed_thread(self.update_token)
         self.container.spawn_managed_thread(self.poll_bus,
                                             identifier='odoo_bus_poller')
         logger.debug('Odoo connection has been started.')
@@ -87,7 +117,6 @@ class OdooConnection(SharedExtension, ProviderCollector):
         except http.client.RemoteDisconnected:
             logger.error('Odoo remote disconnection.')
         except Exception as e:
-            print(1, repr(e), str(e))
             if 'Connection refused' in repr(e):
                 logger.error('Odoo refusing connection.')
             else:
@@ -207,8 +236,31 @@ class OdooConnection(SharedExtension, ProviderCollector):
                 if not no_wait:
                     eventlet.sleep(1)
 
-    def handle_bus_message(self, channel, message):
-        # Get provieers and pass the message
+    def check_security_token(self, message):
+        # If no agent model is given then check is disabled.
+        if not self.container.config.get('ODOO_AGENT_MODEL'):
+            return
+        if message['token'] != self.odoo.token:
+            # Check for race condition when token has been just updated
+            if self.odoo.token_old == message['token']:
+                if abs(time.time() - self.odoo.token_update_time) > 3:
+                    logger.error(
+                        'Outdated token, ignoring message: %s', message)
+                    return
+                else:
+                    logger.debug('Accepting old token message: %s', message)
+            else:
+                logger.error('Bad message token: %s', message)
+                return
+
+    def handle_bus_message(self, channel, raw_message):
+        # Check message type
+        try:
+            message = json.loads(raw_message)
+        except TypeError:
+            logger.error('Cannot load json from message: %s', raw_message)
+            return
+        # Get proviers and pass the message
         for provider in self._providers:
                 provider.handle_message(channel, message)
         if not self._providers:
@@ -268,6 +320,11 @@ class BusEventHandler(Entrypoint):
             self.connection.channels.append(channel)
 
     def setup(self):
+        # Check for channels supplied in configuration file.
+        config_channels = self.container.config.get('ODOO_BUS_POLL_CHANNELS')
+        if config_channels:
+            logger.info('Adding poll channels from config file.')
+            self.channels.extend(config_channels)
         for channel in self.channels:
             self.connection.channels.append(channel)
         self.connection.register_provider(self)
@@ -276,10 +333,19 @@ class BusEventHandler(Entrypoint):
         self.connection.unregister_provider(self)
 
     def handle_message(self, channel, message):
+        handle_result = partial(self.handle_result, message)
         if self.check_entrypoint_channels and channel not in self.channels:
             logger.debug('Ignoring message on uknown channel %s', channel)
         else:
-            self.container.spawn_worker(self, (channel, message), {})
+            self.container.spawn_worker(
+                self, (channel, message), {}, handle_result=handle_result)
+
+    def handle_result(self, message, worker_ctx, result, exc_info):
+        if exc_info:
+            tb = ''.join(traceback.format_tb(exc_info[2]))
+            logger.error('Handle message error: %s\n%s', repr(exc_info[1]), tb)
+        # TODO: reply channel
+        return result, exc_info
 
 
 bus = BusEventHandler.decorator
