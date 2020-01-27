@@ -5,13 +5,15 @@ import http.client
 import logging
 from nameko.extensions import Entrypoint, DependencyProvider
 from nameko.extensions import SharedExtension, ProviderCollector
+from nameko.standalone.rpc import ClusterRpcProxy
+from nameko.exceptions import RpcTimeout
 import odoorpc
+from functools import partial
 import requests
 import time
 import traceback
 import uuid
 from urllib.error import URLError
-
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +76,7 @@ class OdooConnection(SharedExtension, ProviderCollector):
                 logger.exception('Update token error:')
             finally:
                 eventlet.sleep(
-                    float(self.container.config['ODOO_REFRESH_TOKEN_SECONDS']))                
+                    float(self.container.config['ODOO_REFRESH_TOKEN_SECONDS']))
 
     def start(self):
         effort = 11
@@ -260,6 +262,12 @@ class OdooConnection(SharedExtension, ProviderCollector):
         except TypeError:
             logger.error('Cannot load json from message: %s', raw_message)
             return
+        # Check if this is nameko RPC message
+        if message.get('command') == 'nameko-rpc':
+            handle_nameko_rpc = partial(
+                self.handle_nameko_rpc, channel, message)
+            self.container.spawn_managed_thread(handle_nameko_rpc)
+            return
         # Get proviers and pass the message
         for provider in self._providers:
                 provider.handle_message(channel, message)
@@ -267,17 +275,40 @@ class OdooConnection(SharedExtension, ProviderCollector):
             logger.warning('Ignoring message on channel %s, no providers',
                            channel)
 
-    def notify_user(self, uid, message, title='Notification',
-                    level='info', sticky=False):
-        # Helper func used from services to sent Odoo user notifications.
-        if not uid:
-            logger.debug('No uid, will not notify')
-            return
-        logger.debug('Notify user %s: %s', uid, message)
-        self.bus_sendone('notify_{}_{}'.format(level, uid),
-                         {'message': message,
-                          'sticky': sticky,
-                          'title': title})
+    def handle_nameko_rpc(self, channel, message):
+        logger.debug('Channel %s nameko RPC message: %s', channel, message)
+        # Handle Nameko RPC request sent from Odoo and return the result.
+        result = {'error': {}}
+        # Return back data sent by caller.
+        if message.get('pass_back'):
+            result['pass_back'] = message['pass_back']
+        try:
+            service_name = message['service']
+            method = message['method']
+            args = message.get('args', ())
+            kwargs = message.get('kwargs', {})
+            callback_model = message['callback_model']
+            timeout = float(message.get('timeout', '3'))
+            callback_method = message['callback_method']
+            with ClusterRpcProxy(
+                    self.container.config, timeout=timeout) as cluster_rpc:
+                service = getattr(cluster_rpc, service_name)
+                ret = getattr(service, method)(*args, **kwargs)
+                logger.debug('Nameko RPC result: %s', ret)
+                result['result'] = ret
+        except RpcTimeout:
+            logger.warning('[NAMEKO_RPC_TIMEOUT] %s.%s timeout: %s',
+                           service_name, method, timeout)
+            result['error']['message'] = 'Service {} {} timeout.'.format(
+                service_name, method)
+        except Exception as e:
+            logger.exception('[NAMEKO_RPC_ERROR]')
+            result['error']['message'] = str(e)
+        finally:
+            try:
+                self.odoo.execute(callback_model, callback_method, result)
+            except Exception:
+                logger.exception('[ODOO_RPC_ERROR]')
 
     def bus_sendone(self, channel, message):
         self.odoo.env['bus.bus'].sendone(channel, message)
