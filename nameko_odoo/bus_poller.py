@@ -105,6 +105,8 @@ class OdooConnection(SharedExtension, ProviderCollector):
             self.odoo = odoo
             if not self.odoo_connected.ready():
                 self.odoo_connected.send(odoo)
+            # Ping the bus to initialize message counter
+            self.bus_sendone(self.channels[0], {'command': 'bus-ping'})
 
         except odoorpc.error.RPCError as e:
             if 'res.users()' in str(e):
@@ -268,6 +270,9 @@ class OdooConnection(SharedExtension, ProviderCollector):
                 self.handle_nameko_rpc, channel, message)
             self.container.spawn_managed_thread(handle_nameko_rpc)
             return
+        elif message.get('command') == 'bus-ping':
+            logger.debug('Bus ping received.')
+            return
         # Get proviers and pass the message
         for provider in self._providers:
                 provider.handle_message(channel, message)
@@ -287,9 +292,9 @@ class OdooConnection(SharedExtension, ProviderCollector):
             method = message['method']
             args = message.get('args', ())
             kwargs = message.get('kwargs', {})
-            callback_model = message['callback_model']
+            callback_model = message.get('callback_model')
+            callback_method = message.get('callback_method')
             timeout = float(message.get('timeout', '3'))
-            callback_method = message['callback_method']
             with ClusterRpcProxy(
                     self.container.config, timeout=timeout) as cluster_rpc:
                 service = getattr(cluster_rpc, service_name)
@@ -305,10 +310,15 @@ class OdooConnection(SharedExtension, ProviderCollector):
             logger.exception('[NAMEKO_RPC_ERROR]')
             result['error']['message'] = str(e)
         finally:
-            try:
-                self.odoo.execute(callback_model, callback_method, result)
-            except Exception:
-                logger.exception('[ODOO_RPC_ERROR]')
+            if callback_model and callback_method:
+                try:
+                    logger.debug('Execute %s.%s.',
+                                 callback_model, callback_method)
+                    self.odoo.execute(callback_model, callback_method, result)
+                except Exception:
+                    logger.exception('[ODOO_RPC_ERROR]')
+            else:
+                logger.debug('No callback model / method specified.')
 
     def bus_sendone(self, channel, message):
         self.odoo.env['bus.bus'].sendone(channel, message)
