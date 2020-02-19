@@ -22,6 +22,9 @@ class BusPoller(SharedExtension, ProviderCollector):
         self.channels.append(channel)
 
     def setup(self):
+        if not self.container.config.get('ODOO_ENABLED'):
+            logger.info('Odoo disabled.')
+            return
         self.channels.append('remote_agent/{}'.format(
             self.container.config['SYSTEM_NAME']))
         self.host = self.container.config['ODOO_HOST']
@@ -44,6 +47,8 @@ class BusPoller(SharedExtension, ProviderCollector):
         logger.debug('Odoo connection setup done.')
 
     def start(self):
+        if not self.container.config.get('ODOO_ENABLED'):
+            return
         self.container.spawn_managed_thread(self.poll_bus,
                                             identifier='odoo_bus_poller')
         logger.debug('Odoo connection has been started.')

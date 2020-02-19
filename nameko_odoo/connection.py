@@ -18,6 +18,9 @@ class OdooConnection(SharedExtension):
     token_update_time = time.time()
 
     def setup(self):
+        if not self.container.config.get('ODOO_ENABLED'):
+            logger.info('Odoo disabled.')
+            return
         # Must be defined settings
         self.host = self.container.config['ODOO_HOST']
         self.port = self.container.config['ODOO_PORT']
