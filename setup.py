@@ -37,7 +37,7 @@ setup(
     },
     dependency_links=[],
     zip_safe=True,
-    license='Apache License, Version 2.0',
+    license='GNU LESSER GENERAL PUBLIC LICENSE V3',
     classifiers=[
         "Programming Language :: Python",
         "Operating System :: MacOS :: MacOS X",

@@ -17,12 +17,12 @@ class Command:
             try:
                 self.cls.connection.odoo.env['bus.bus'].sendone(
                     'remote_agent_notification_{}'.format(uid),
-                    {'message': 'Ping reply'})
+                    {'message': 'Ping reply', 'title': 'Remote Agent'})
             except Exception:
                 logger.exception('Ping error:')
 
     def restart(self, channel, message):
-        logger.info('Restar command received.')
+        logger.info('Restart command received.')
         args = sys.argv[:]
         uid = message.get('notify_uid')
         if uid:
@@ -32,9 +32,10 @@ class Command:
         os.execv(sys.executable, [sys.executable] + args)
 
     def nameko_rpc(self, channel, message):
-        logger.debug('Channel %s nameko RPC message: %s', channel, message)
+        logger.debug('Channel %s nameko RPC message: %s', channel,
+                     str(message)[:512])
         # Handle Nameko RPC request sent from Odoo and return the result.
-        result = {'error': {}}
+        result = {}
         # Return back data sent by caller.
         if message.get('pass_back'):
             result['pass_back'] = message['pass_back']
@@ -50,16 +51,16 @@ class Command:
                     self.cls.container.config, timeout=timeout) as cluster_rpc:
                 service = getattr(cluster_rpc, service_name)
                 ret = getattr(service, method)(*args, **kwargs)
-                logger.debug('Nameko RPC result: %s', ret)
                 result['result'] = ret
         except RpcTimeout:
             logger.warning('[NAMEKO_RPC_TIMEOUT] %s.%s timeout: %s',
                            service_name, method, timeout)
-            result['error']['message'] = 'Service {} {} timeout.'.format(
+            result.setdefault(
+                'error', {})['message'] = 'Service {} {} timeout.'.format(
                 service_name, method)
         except Exception as e:
             logger.exception('[NAMEKO_RPC_ERROR]')
-            result['error']['message'] = str(e)
+            result.setdefault('error', {})['message'] = str(e)
         finally:
             if callback_model and callback_method:
                 try:

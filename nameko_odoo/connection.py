@@ -18,9 +18,6 @@ class OdooConnection(SharedExtension):
     token_update_time = time.time()
 
     def setup(self):
-        if not self.container.config.get('ODOO_ENABLED'):
-            logger.info('Odoo disabled.')
-            return
         # Must be defined settings
         self.host = self.container.config['ODOO_HOST']
         self.port = self.container.config['ODOO_PORT']
@@ -45,7 +42,8 @@ class OdooConnection(SharedExtension):
             self.odoo = odoo
             self.container.spawn_managed_thread(self.update_token)
             self.container.spawn_managed_thread(self.ping_on_start)
-            self.connected.send()
+            if not self.connected.ready():
+                self.connected.send()
         except odoorpc.error.RPCError as e:
             if 'res.users()' in str(e):
                 logger.error('Odoo login %s not found or bad password %s.',

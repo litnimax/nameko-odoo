@@ -14,9 +14,6 @@ logger = logging.getLogger(__name__)
 class AgentWebServer(WebServer):
 
     def start(self):
-        if not self.container.config.get('ODOO_ENABLED'):
-            logger.info('Odoo disabled.')
-            return
         if self.container.config.get('WEB_SERVER_ENABLED'):
             logger.info('Starting HTTP server at %s.',
                         self.container.config.get('WEB_SERVER_ADDRESS'))

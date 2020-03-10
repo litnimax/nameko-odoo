@@ -11,6 +11,8 @@ from .connection import OdooConnection
 
 logger = logging.getLogger(__name__)
 
+CHANNEL_PREFIX = 'remote_agent'
+
 
 class BusPoller(SharedExtension, ProviderCollector):
     db_selected = False
@@ -22,11 +24,6 @@ class BusPoller(SharedExtension, ProviderCollector):
         self.channels.append(channel)
 
     def setup(self):
-        if not self.container.config.get('ODOO_ENABLED'):
-            logger.info('Odoo disabled.')
-            return
-        self.channels.append('remote_agent/{}'.format(
-            self.container.config['SYSTEM_NAME']))
         self.host = self.container.config['ODOO_HOST']
         self.port = self.container.config.get('ODOO_BUS_PORT', 8072)
         self.user = self.container.config['ODOO_USER']
@@ -47,8 +44,6 @@ class BusPoller(SharedExtension, ProviderCollector):
         logger.debug('Odoo connection setup done.')
 
     def start(self):
-        if not self.container.config.get('ODOO_ENABLED'):
-            return
         self.container.spawn_managed_thread(self.poll_bus,
                                             identifier='odoo_bus_poller')
         logger.debug('Odoo connection has been started.')
@@ -136,14 +131,14 @@ class BusPoller(SharedExtension, ProviderCollector):
                 if last == 0:
                     # Ommit queued data
                     for msg in result:
-                        logger.debug('Ommit bus message %s', msg)
+                        logger.debug('Ommit bus message %s', str(msg)[:512])
                         last = msg['id']
                     continue
                 # TODO: Check that tis is really
                 # my channel as Odoo can send a match
                 for msg in result:
                     last = msg['id']
-                    logger.debug('Received bus message %s', msg)
+                    logger.debug('Received bus message %s', str(msg)[:512])
                     try:
                         self.handle_bus_message(msg['channel'], msg['message'])
                     except Exception:
@@ -215,6 +210,9 @@ class BusEventHandler(Entrypoint):
             self.poller.channels.append(channel)
 
     def setup(self):
+        # Poll on SYSTEM_NAME
+        self.channels.append('{}/{}'.format(
+            CHANNEL_PREFIX, self.container.config['SYSTEM_NAME']))
         # Check for additional channels supplied in configuration file.
         config_channels = self.container.config.get('ODOO_BUS_POLL_CHANNELS')
         if config_channels:

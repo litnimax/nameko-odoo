@@ -1,2 +1,4 @@
 *.pyc
 __pycache__
+dist/
+nameko_odoo.egg-info/
