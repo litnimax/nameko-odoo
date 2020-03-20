@@ -94,8 +94,7 @@ class OdooConnection(SharedExtension):
                 self.old_token = self.token
                 # Generate new token
                 self.token = uuid.uuid4().hex
-                self.odoo.env['remote_agent.agent'].update_token(
-                    self.container.config['SYSTEM_NAME'], self.token)
+                self.odoo.env['remote_agent.agent'].update_token(self.token)
                 # Keep time of token update
                 self.token_update_time = time.time()
                 logger.debug('Agent token updated.')

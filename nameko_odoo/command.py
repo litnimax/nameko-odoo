@@ -74,6 +74,8 @@ class Command:
                         callback_model, callback_method, result)
                 except Exception:
                     logger.exception('[CONNECTION.ODOO_RPC_ERROR]')
+            else:
+                logger.debug('No callback model / method specified.')
             # Check if we shoud send status report
             if message.get('status_notify_uid'):
                 uid = message['status_notify_uid']
@@ -92,5 +94,3 @@ class Command:
                         })
                 except Exception:
                     logger.exception('[CONNECTION.ODOO_RPC_ERROR]')
-            else:
-                logger.debug('No callback model / method specified.')
