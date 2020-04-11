@@ -50,7 +50,7 @@ class Command:
         callback_model = message.get('callback_model')
         callback_method = message.get('callback_method')
         try:
-            timeout = float(message.get('timeout', '3'))
+            timeout = float(message.get('timeout', '30'))
             with ClusterRpcProxy(
                     self.cls.container.config, timeout=timeout) as cluster_rpc:
                 service = getattr(cluster_rpc, service_name)

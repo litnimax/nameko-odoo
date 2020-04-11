@@ -20,10 +20,10 @@ class OdooConnection(SharedExtension):
     def setup(self):
         # Must be defined settings
         self.host = self.container.config['ODOO_HOST']
-        self.port = self.container.config['ODOO_PORT']
-        self.user = self.container.config['ODOO_USER']
-        self.password = self.container.config['ODOO_PASS']
-        self.db = self.container.config['ODOO_DB']
+        self.port = int(self.container.config['ODOO_PORT'])
+        self.user = str(self.container.config['ODOO_USER'])
+        self.password = str(self.container.config['ODOO_PASS'])
+        self.db = str(self.container.config['ODOO_DB'])
         self.protocol = (
             'jsonrpc+ssl' if self.container.config.get(
                 'ODOO_USE_SSL') else 'jsonrpc')
