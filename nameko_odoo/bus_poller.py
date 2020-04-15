@@ -34,7 +34,7 @@ class BusPoller(SharedExtension, ProviderCollector):
             'ODOO_VERIFY_CERTIFICATE')
         self.bus_enabled = self.container.config.get('ODOO_BUS_ENABLED')
         self.bus_polling_port = self.container.config.get(
-            'ODOO_BUS_POLLING_PORT', 8072)
+            'ODOO_BUS_PORT', 8072)
         self.bus_timeout = self.container.config.get(
             'ODOO_BUS_TIMEOUT', 55)
         self.bus_trace = self.container.config.get(
@@ -60,6 +60,7 @@ class BusPoller(SharedExtension, ProviderCollector):
         scheme = 'https' if self.use_ssl else 'http'
         auth_url = '{}://{}:{}/web/session/authenticate'.format(
             scheme, self.host, self.bus_polling_port)
+        logger.debug('Odoo authenticate at %s', auth_url)
         data = {
             'jsonrpc': '2.0',
             'params': {
