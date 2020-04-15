@@ -90,11 +90,12 @@ class OdooConnection(SharedExtension):
         self.connected.wait()
         while True:
             try:
+                new_token = uuid.uuid4().hex
+                self.odoo.env['remote_agent.agent'].update_token(new_token)
                 # Keep previous token
                 self.old_token = self.token
                 # Generate new token
-                self.token = uuid.uuid4().hex
-                self.odoo.env['remote_agent.agent'].update_token(self.token)
+                self.token = new_token
                 # Keep time of token update
                 self.token_update_time = time.time()
                 logger.debug('Agent token updated.')
