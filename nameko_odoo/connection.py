@@ -1,5 +1,6 @@
 import eventlet
 from eventlet.event import Event
+import json
 import logging
 from nameko.extensions import SharedExtension
 import odoorpc
@@ -29,7 +30,8 @@ class OdooConnection(SharedExtension):
                 'ODOO_USE_SSL') else 'jsonrpc')
         self.verify_certificate = self.container.config.get(
             'ODOO_VERIFY_CERTIFICATE', False)
-        self.setup_rpc_session()
+        while not self.setup_rpc_session():
+            eventlet.sleep(1)
 
     def setup_rpc_session(self):
         try:
@@ -44,6 +46,7 @@ class OdooConnection(SharedExtension):
             self.container.spawn_managed_thread(self.ping_on_start)
             if not self.connected.ready():
                 self.connected.send()
+            return True
         except odoorpc.error.RPCError as e:
             if 'res.users()' in str(e):
                 logger.error('Odoo login %s not found or bad password %s.',
@@ -66,7 +69,7 @@ class OdooConnection(SharedExtension):
             if self.container.config.get('ODOO_BUS_ENABLED'):
                 self.odoo.env['bus.bus'].sendone('remote_agent/{}'.format(
                     self.container.config['SYSTEM_NAME']),
-                    {'command': 'ping'})
+                    json.dumps({'command': 'ping'}))
         except Exception:
             logger.exception('Ping on start error:')
 
